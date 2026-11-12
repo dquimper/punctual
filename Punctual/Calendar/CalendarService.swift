@@ -7,11 +7,11 @@ struct CalendarService {
 
     private nonisolated static let baseURL = URL(string: "https://www.googleapis.com/calendar/v3")!
 
-    /// Today's and tomorrow's timed meetings across all selected calendars,
-    /// deduped and sorted by start. Fetching a day ahead keeps the menu bar
-    /// useful after the last meeting and lets alerts for early-morning
-    /// meetings arm before an overnight sleep.
-    func fetchMeetings() async throws -> [Meeting] {
+    /// Every calendar the account can read, plus today's and tomorrow's timed
+    /// meetings from the ones enabled in Settings, deduped and sorted by start.
+    /// Fetching a day ahead keeps the menu bar useful after the last meeting and
+    /// lets alerts for early-morning meetings arm before an overnight sleep.
+    func fetchMeetings() async throws -> CalendarFetchResult {
         var token = try await auth.validAccessToken()
         do {
             return try await fetchAll(token: token)
@@ -22,8 +22,11 @@ struct CalendarService {
         }
     }
 
-    private func fetchAll(token: String) async throws -> [Meeting] {
-        let calendarIDs = try await fetchSelectedCalendarIDs(token: token)
+    private func fetchAll(token: String) async throws -> CalendarFetchResult {
+        let calendars = try await fetchCalendarList(token: token)
+        let calendarIDs = calendars
+            .filter { AppSettings.isCalendarEnabled(id: $0.id, selectedInGoogle: $0.selectedInGoogle) }
+            .map(\.id)
 
         let calendar = Calendar.current
         let startOfDay = calendar.startOfDay(for: Date())
@@ -42,7 +45,10 @@ struct CalendarService {
             for try await batch in group { merged.append(contentsOf: batch) }
             return merged
         }
-        return Self.dedupe(meetings).sorted { $0.start < $1.start }
+        return CalendarFetchResult(
+            calendars: calendars,
+            meetings: Self.dedupe(meetings).sorted { $0.start < $1.start }
+        )
     }
 
     /// The same event invited to several of the user's calendars shares an iCalUID;
@@ -56,19 +62,31 @@ struct CalendarService {
         return Array(byUID.values)
     }
 
-    private func fetchSelectedCalendarIDs(token: String) async throws -> [String] {
+    /// All readable calendars, primary first, then alphabetical.
+    private func fetchCalendarList(token: String) async throws -> [CalendarInfo] {
         var components = URLComponents(
             url: Self.baseURL.appending(path: "users/me/calendarList"),
             resolvingAgainstBaseURL: false
         )!
         components.queryItems = [
             URLQueryItem(name: "minAccessRole", value: "reader"),
-            URLQueryItem(name: "fields", value: "items(id,summary,selected,primary)"),
+            URLQueryItem(name: "fields", value: "items(id,summary,selected,primary,backgroundColor)"),
         ]
         let response: GCalCalendarListResponse = try await Self.get(components.url!, token: token)
         return (response.items ?? [])
-            .filter { $0.selected != false }
-            .map(\.id)
+            .map {
+                CalendarInfo(
+                    id: $0.id,
+                    name: $0.summary?.isEmpty == false ? $0.summary! : $0.id,
+                    colorHex: $0.backgroundColor,
+                    isPrimary: $0.primary == true,
+                    selectedInGoogle: $0.selected != false
+                )
+            }
+            .sorted {
+                if $0.isPrimary != $1.isPrimary { return $0.isPrimary }
+                return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+            }
     }
 
     private nonisolated static func fetchEvents(
@@ -125,6 +143,22 @@ struct CalendarService {
             throw CalendarAPIError.http(http.statusCode, String(data: data, encoding: .utf8) ?? "")
         }
     }
+}
+
+/// A calendar on the user's Google Calendar list, for the Settings picker.
+struct CalendarInfo: Identifiable, Equatable, Sendable {
+    let id: String
+    let name: String
+    let colorHex: String?
+    let isPrimary: Bool
+    /// Whether it is ticked in Google Calendar's web UI; the default when the
+    /// user hasn't chosen in Punctual.
+    let selectedInGoogle: Bool
+}
+
+struct CalendarFetchResult: Sendable {
+    let calendars: [CalendarInfo]
+    let meetings: [Meeting]
 }
 
 enum CalendarAPIError: LocalizedError {

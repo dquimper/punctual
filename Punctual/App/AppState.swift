@@ -14,6 +14,8 @@ final class AppState {
 
     var authState: AuthState = .signedOut
     var meetings: [Meeting] = []
+    /// Every calendar on the account, for the Settings picker.
+    var calendars: [CalendarInfo] = []
     var menuTitle: String = "…"
     var lastUpdated: Date?
     var lastError: String?
@@ -84,7 +86,9 @@ final class AppState {
             return
         }
         do {
-            meetings = try await calendarService.fetchMeetings()
+            let result = try await calendarService.fetchMeetings()
+            meetings = result.meetings
+            calendars = result.calendars
             lastUpdated = Date()
             lastError = nil
         } catch AuthError.signedOut {
@@ -142,6 +146,7 @@ final class AppState {
     private func handleSignedOut() {
         authState = .signedOut
         meetings = []
+        calendars = []
         lastUpdated = nil
         alertScheduler.clearAll()
         tick()
