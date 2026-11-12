@@ -11,6 +11,7 @@ struct GCalCalendarListEntry: Decodable {
     let summary: String?
     let selected: Bool?
     let primary: Bool?
+    let backgroundColor: String?
 }
 
 struct GCalEventsResponse: Decodable {
