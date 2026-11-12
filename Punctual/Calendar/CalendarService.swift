@@ -45,15 +45,22 @@ struct CalendarService {
         return Self.dedupe(meetings).sorted { $0.start < $1.start }
     }
 
-    /// The same event invited to several of the user's calendars shares an iCalUID;
-    /// keep the copy that has a join link.
+    /// The same event invited to several of the user's calendars shares an iCalUID
+    /// and a start time; keep the copy that has a join link. Every instance of a
+    /// recurring series also shares the iCalUID, so the start time is part of the
+    /// key — otherwise today's and tomorrow's instances collapse into one.
     nonisolated static func dedupe(_ meetings: [Meeting]) -> [Meeting] {
-        var byUID: [String: Meeting] = [:]
-        for meeting in meetings {
-            if let existing = byUID[meeting.iCalUID], existing.joinURL != nil { continue }
-            byUID[meeting.iCalUID] = meeting
+        struct Key: Hashable {
+            let iCalUID: String
+            let start: Date
         }
-        return Array(byUID.values)
+        var byKey: [Key: Meeting] = [:]
+        for meeting in meetings {
+            let key = Key(iCalUID: meeting.iCalUID, start: meeting.start)
+            if let existing = byKey[key], existing.joinURL != nil { continue }
+            byKey[key] = meeting
+        }
+        return Array(byKey.values)
     }
 
     private func fetchSelectedCalendarIDs(token: String) async throws -> [String] {
