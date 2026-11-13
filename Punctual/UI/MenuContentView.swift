@@ -1,9 +1,17 @@
 import SwiftUI
 
+private struct ListContentHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 /// The dropdown shown when clicking the menu bar item.
 struct MenuContentView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.openSettings) private var openSettings
+    @State private var listContentHeight: CGFloat = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -135,8 +143,16 @@ struct MenuContentView: View {
                 }
             }
             .padding(6)
+            .background(
+                GeometryReader { proxy in
+                    Color.clear.preference(key: ListContentHeightKey.self, value: proxy.size.height)
+                }
+            )
         }
-        .frame(maxHeight: 320)
+        // A ScrollView has no intrinsic height, and inside a MenuBarExtra window it
+        // collapses to zero. Give it the measured content height, capped.
+        .frame(height: min(listContentHeight, 320))
+        .onPreferenceChange(ListContentHeightKey.self) { listContentHeight = $0 }
     }
 
     private var footer: some View {
